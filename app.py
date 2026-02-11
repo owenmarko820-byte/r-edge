@@ -146,20 +146,30 @@ if uploaded:
     # ---- Biggest Leak Detector ----
     st.subheader("🧠 AI Performance Insight")
 
-    leak_setup = (
-        df.groupby("setup")["net_pnl"]
-        .mean()
-        .sort_values()
+    data = df  # use filtered df later if needed
+
+    if len(data) == 0:
+        st.info("Upload data to detect performance leaks.")
+    else:
+        leak_setup = (
+            data.groupby("setup")["net_pnl"]
+            .mean()
+            .sort_values(ascending=True)
     )
 
     worst_setup = leak_setup.index[0]
-    worst_value = leak_setup.iloc[0]
+    worst_value = float(leak_setup.iloc[0])
 
     if worst_value < 0:
         st.error(
-            f"Biggest Leak Detected: Your **{worst_setup}** setup is losing money "
-            f"(avg £{worst_value:.2f} per trade)."
-        )    
+            f"🚨 Biggest Leak Detected: **{worst_setup}** "
+            f"is losing **{worst_value:.2f} per trade on average.**"
+        )
+    else:
+        st.success(
+            f"✅ No losing setup detected. Weakest setup: **{worst_setup}** "
+            f"(avg {worst_value:.2f})."
+        )
 
     mult = df.attrs.get("calibration_multiplier", 1.0)
     st.caption(f"Calibration multiplier applied: **{mult:.4f}**")
