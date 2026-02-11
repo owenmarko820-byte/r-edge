@@ -40,9 +40,7 @@ with st.sidebar:
             step=1
         )
 
-        show_debug = st.checkbox("Precision Diagnostics", value=False)
-        show_debug = False
-
+show_debug = False
 
 uploaded = st.file_uploader("Upload a CSV, then tune the engine to match your broker.", type=["csv"])
 
