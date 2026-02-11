@@ -15,10 +15,10 @@ Built for traders who treat performance like a business.
 # Sidebar — Control Center
 with st.sidebar:
 
-    st.header("Control Center")
+    st.header("Trading Engine")
     st.caption("Upload your trades. Tune the engine. Find your edge.")
 
-    with st.expander("Advanced: Broker Calibration", expanded=False):
+    with st.expander("Broker Sync", expanded=False):
 
         xau_price_divisor = st.selectbox(
             "Price scaling (divide entry/exit by)",
@@ -40,7 +40,7 @@ with st.sidebar:
             step=1
         )
 
-        show_debug = st.checkbox("Developer mode", value=False)
+        show_debug = st.checkbox("Precision Diagnostics", value=False)
 
 
 uploaded = st.file_uploader("Upload a CSV, then tune the engine to match your broker.", type=["csv"])
