@@ -156,6 +156,22 @@ if uploaded:
             .mean()
             .sort_values(ascending=True)
     )
+    
+    leak_total = (
+    data.groupby("setup")["net_pnl"]
+    .sum()
+    .sort_values()
+)
+
+worst_total_setup = leak_total.index[0]
+worst_total_value = float(leak_total.iloc[0])
+
+if worst_total_value < 0:
+    st.error(
+        f"💸 Largest Money Leak: **{worst_total_setup}** "
+        f"has lost you **{worst_total_value:.2f} total.**"
+    )
+
 
     worst_setup = leak_setup.index[0]
     worst_value = float(leak_setup.iloc[0])
