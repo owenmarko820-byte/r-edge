@@ -1,0 +1,5 @@
+date,symbol,direction,entry,exit,size,fees,setup,notes,pip_value,risk
+2026-01-02 17:04:04,XAUUSD,short,4385.81,4346.9,0.01,0,breakout,new york session,100,10
+2026-01-05 01:05:24,XAUUSD,long,4323.03,4360.625,0.01,0,trend,asia open,100,10
+2026-01-25 17:02:37,XAUUSD,long,4427.2,4445.03,0.02,0,trend,new york session,100,10
+2026-01-07 15:08:38,XAUUSD,long,4448.56,4435.63,0.02,0,breakout,london + new york,100,10
