@@ -13,7 +13,7 @@ st.title("R-Edge — Find Your Edge. Eliminate Your Losses.")
 st.markdown("""
 ### Find Your Edge. Eliminate Costly Mistakes.
             
-Built for serious traders who treat performance like a business
+Built for traders who refuse to stay average.
             
 R-Edge reveals:
 - Your true expectancy
