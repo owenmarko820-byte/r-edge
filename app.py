@@ -6,7 +6,7 @@ st.set_page_config(page_title="Trading Journal Analyzer", layout="wide")
 st.title("R-Edge")
 
 # ---- Sidebar: Calibration ----
-st.sidebar.header("Calibration (match MT4)")
+st.sidebar.header("Precision Mode")
 xau_price_divisor = st.sidebar.selectbox(
     "XAU price divisor (divide entry/exit by this)",
     options=[1, 10, 100, 1000],
