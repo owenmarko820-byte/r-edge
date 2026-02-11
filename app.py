@@ -2,12 +2,26 @@ import pandas as pd
 import streamlit as st
 import matplotlib.pyplot as plt
 
-st.set_page_config(page_title="Trading Journal Analyzer", layout="wide")
+st.set_page_config(
+    page_title="R-Edge",
+    page_icon="📈",
+    layout="wide"
+)
+
 st.title("R-Edge — Find Your Edge. Eliminate Your Losses.")
+
 st.markdown("""
 ### Find Your Edge. Eliminate Costly Mistakes.
+            
+Built for serious traders who treat performance like a business
+            
+R-Edge reveals:
+- Your true expectancy
+- Hidden execution leaks
+- Setup-level edge
+- Time-of-day peformance inefficiencies
 
-Built for traders who treat performance like a business.
+Upload your journal. Get brutal clarity.
 """)
 
 
@@ -15,7 +29,7 @@ Built for traders who treat performance like a business.
 # Sidebar — Control Center
 with st.sidebar:
 
-    st.header("Trading Engine")
+    st.header("Control Centre")
     st.caption("Upload your trades. Tune the engine. Find your edge.")
 
     with st.expander("Broker Sync", expanded=False):
