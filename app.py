@@ -1,128 +1,147 @@
-import pandas as pd
 import streamlit as st
-import matplotlib.pyplot as plt
+import pandas as pd
+import numpy as np
 
-st.set_page_config(
-    page_title="R-Edge",
-    page_icon="📈",
-    layout="wide"
-)
+
+# ----------------------------
+# Page + Brand
+# ----------------------------
+st.set_page_config(page_title="R-Edge", layout="wide")
 
 st.title("R-Edge — Find Your Edge. Eliminate Your Losses.")
-
-st.markdown("""
+st.markdown(
+    """
 ### Find Your Edge. Eliminate Costly Mistakes.
-            
 Built for traders who are done guessing and ready to trade like professionals.
-            
-R-Edge reveals:
+
+**R-Edge reveals:**
 - Your true expectancy
 - Hidden execution leaks
 - Setup-level edge
-- Time-of-day peformance inefficiencies
+- Time-of-day performance inefficiencies
 
-Upload your journal. Get brutal clarity.
-""")
+**Upload your journal. Get brutal clarity.**
+"""
+)
+
+st.write("")  # spacing
 
 
-# ---- Sidebar: Calibration ----
-# Sidebar — Control Center
+# ----------------------------
+# Sidebar (Control Centre)
+# ----------------------------
 with st.sidebar:
-
     st.header("Control Centre")
     st.caption("Upload your trades. Tune the engine. Find your edge.")
 
-    with st.expander("Broker Sync", expanded=False):
-
+    with st.expander("Broker Sync", expanded=True):
         xau_price_divisor = st.selectbox(
             "Price scaling (divide entry/exit by)",
             options=[1, 10, 100, 1000],
-            index=0
+            index=0,
+            help="If your broker exports prices like 438581 instead of 4385.81, choose 100."
         )
 
         known_profit = st.number_input(
             "Broker P&L (optional)",
             value=0.0,
             step=0.01,
-            help="Type the profit shown in MT4 for a specific trade."
+            help="If MT4 shows a different P&L than your CSV, enter it here to scale the CSV."
         )
 
         calib_row = st.number_input(
             "Calibration row (0 = first trade)",
             min_value=0,
             value=0,
-            step=1
+            step=1,
+            help="Choose which trade row to use for calibration when using Broker P&L."
         )
 
-show_debug = False
+    show_debug = st.checkbox("Precision Diagnostics", value=False)
+
 
 uploaded = st.file_uploader("Upload a CSV, then tune the engine to match your broker.", type=["csv"])
 
 
+# ----------------------------
+# Helpers
+# ----------------------------
 def profit_factor(series: pd.Series) -> float:
     gains = series[series > 0].sum()
     losses = -series[series < 0].sum()
     if losses == 0:
         return float("inf") if gains > 0 else 0.0
-    return gains / losses
+    return float(gains / losses)
 
 
 def max_drawdown(equity: pd.Series) -> float:
     peak = equity.cummax()
     dd = equity - peak
-    return dd.min()
+    return float(dd.min()) if len(dd) else 0.0
+
+
+def safe_float(x, default=0.0) -> float:
+    try:
+        return float(x)
+    except Exception:
+        return float(default)
 
 
 def load_data(file) -> pd.DataFrame:
     df = pd.read_csv(file)
-    df["date"] = pd.to_datetime(df["date"], errors="coerce")
 
-    # ✅ risk column added
-    required = ["date","symbol","direction","entry","exit","size","fees","setup","pip_value","risk"]
+    # Normalize column names (strip spaces)
+    df.columns = [c.strip() for c in df.columns]
+
+    # Required columns
+    required = [
+        "date", "symbol", "direction", "entry", "exit", "size", "fees",
+        "setup", "pip_value", "risk"
+    ]
     missing = [c for c in required if c not in df.columns]
     if missing:
         raise ValueError(f"Missing columns: {missing}")
 
+    # Type conversions
+    df["date"] = pd.to_datetime(df["date"], errors="coerce")
+    df["symbol"] = df["symbol"].astype(str).str.strip().str.upper()
+    df["direction"] = df["direction"].astype(str).str.strip().str.lower()
+    df["setup"] = df["setup"].astype(str).str.strip().str.lower()
+
+    # Make numeric
+    numeric_cols = ["entry", "exit", "size", "fees", "pip_value", "risk"]
+    for c in numeric_cols:
+        df[c] = pd.to_numeric(df[c], errors="coerce")
+
+    # Drop rows with missing essentials
     df = df.dropna(subset=required).copy()
 
-    for col in ["entry","exit","size","fees","pip_value","risk"]:
-        df[col] = pd.to_numeric(df[col], errors="coerce")
+    # Apply price scaling
+    df["entry_eff"] = df["entry"] / float(xau_price_divisor)
+    df["exit_eff"] = df["exit"] / float(xau_price_divisor)
 
-    df = df.dropna(subset=["entry","exit","size","fees","pip_value","risk"]).copy()
+    # Gross P&L base (money)
+    # direction: long -> (exit-entry); short -> (entry-exit)
+    move = np.where(df["direction"] == "long",
+                    df["exit_eff"] - df["entry_eff"],
+                    df["entry_eff"] - df["exit_eff"])
 
-    df["symbol"] = df["symbol"].astype(str).str.strip()
-    df["direction"] = df["direction"].astype(str).str.lower().str.strip()
-    df["setup"] = df["setup"].astype(str).str.strip()
+    df["gross_pnl_base"] = move * df["size"] * df["pip_value"]
+    df["fees"] = df["fees"].fillna(0.0)
+    df["gross_pnl_base"] = df["gross_pnl_base"].fillna(0.0)
 
-    # Effective prices
-    df["entry_eff"] = df["entry"]
-    df["exit_eff"] = df["exit"]
-
-    # Apply divisor for XAU only (if needed)
-    xau_mask = df["symbol"].str.upper().str.contains("XAU", na=False)
-    df.loc[xau_mask, "entry_eff"] = df.loc[xau_mask, "entry_eff"] / float(xau_price_divisor)
-    df.loc[xau_mask, "exit_eff"]  = df.loc[xau_mask, "exit_eff"]  / float(xau_price_divisor)
-
-    # Base PnL (uses CSV pip_value)
-    df["gross_pnl_base"] = (df["exit_eff"] - df["entry_eff"]) * df["size"] * df["pip_value"]
-    df.loc[df["direction"] == "short", "gross_pnl_base"] *= -1
-
-    # Calibration multiplier to match MT4
+    # Optional calibration multiplier
     multiplier = 1.0
-    if known_profit != 0.0 and len(df) > 0:
-        r = int(calib_row)
-        r = min(max(r, 0), len(df) - 1)
-        base = float(df["gross_pnl_base"].iloc[r])
-        if base != 0:
-            multiplier = float(known_profit) / base
+    base = safe_float(df["gross_pnl_base"].iloc[int(min(max(calib_row, 0), len(df) - 1))], 0.0)
+    if known_profit != 0.0 and base != 0.0:
+        multiplier = float(known_profit) / float(base)
 
     df["gross_pnl"] = df["gross_pnl_base"] * multiplier
     df["net_pnl"] = df["gross_pnl"] - df["fees"]
 
-    # R multiple (process metric)
-    # If risk is <= 0, set R to NaN to avoid nonsense
+    # Risk / R metrics
     df["risk"] = df["risk"].abs()
-    df.loc[df["risk"] <= 0, "risk"] = pd.NA
+    df.loc[df["risk"] <= 0, "risk"] = np.nan  # avoid nonsense
     df["R"] = df["net_pnl"] / df["risk"]
 
     df["is_win"] = df["net_pnl"] > 0
@@ -133,214 +152,240 @@ def load_data(file) -> pd.DataFrame:
     return df
 
 
+# ----------------------------
+# Main App (ONLY after upload)
+# ----------------------------
 if uploaded:
     try:
         df = load_data(uploaded)
-
     except Exception as e:
         st.error(str(e))
         st.stop()
 
-
-# 🔥 Biggest Money Leak
-
-
-        leak_total = (
-    df.groupby("setup")["net_pnl"]
-    .sum()
-    .sort_values()
-)
-
-if len(leak_total) > 0:
-    worst_total_setup = leak_total.index[0]
-    worst_total_value = float(leak_total.iloc[0])
-
-    if worst_total_value < 0:
-        st.error(
-            f"💸 Largest Money Leak: **{worst_total_setup}** "
-            f"has lost you **{worst_total_value:.2f}** total."
-        )
-
-
-    mult = df.attrs.get("calibration_multiplier", 1.0)
-
-
-    # ---- Biggest Leak Detector ----
-    st.subheader("🧠 AI Performance Insight")
-
-    data = df  # use filtered df later if needed
-
-    if len(data) == 0:
-        st.info("Upload data to detect performance leaks.")
-    else:
-        leak_setup = (
-            data.groupby("setup")["net_pnl"]
-            .mean()
-            .sort_values(ascending=True)
-    )
-
-    worst_setup = leak_setup.index[0]
-    worst_value = float(leak_setup.iloc[0])
-
-    if worst_value < 0:
-        st.error(
-            f"🚨 Biggest Leak Detected: **{worst_setup}** "
-            f"is losing **{worst_value:.2f} per trade on average.**"
-        )
-    else:
-        st.success(
-            f"✅ No losing setup detected. Weakest setup: **{worst_setup}** "
-            f"(avg {worst_value:.2f})."
-        )
-
     mult = df.attrs.get("calibration_multiplier", 1.0)
     st.caption(f"Calibration multiplier applied: **{mult:.4f}**")
 
-    if show_debug and len(df) > 0:
-        st.subheader("Debug")
-        r = min(max(int(calib_row), 0), len(df) - 1)
-        row = df.iloc[r]
-        st.write("Row used:", r)
-        st.write("entry raw:", float(row["entry"]), "exit raw:", float(row["exit"]))
-        st.write("entry eff:", float(row["entry_eff"]), "exit eff:", float(row["exit_eff"]))
-        st.write("size:", float(row["size"]))
-        st.write("pip_value:", float(row["pip_value"]))
-        st.write("gross_pnl_base:", float(row["gross_pnl_base"]))
-        st.write("multiplier:", float(mult))
-        st.write("net_pnl:", float(row["net_pnl"]))
-        st.write("risk:", float(row["risk"]))
-        st.write("R:", float(row["R"]) if pd.notna(row["R"]) else None)
+    # -----------------------------------
+    # 🔥 Biggest Money Leak (TOTAL)
+    # -----------------------------------
+    st.subheader("🔥 Biggest Money Leak (Total)")
+    leak_total = (
+        df.groupby("setup")["net_pnl"]
+        .sum()
+        .sort_values()
+    )
 
+    if len(leak_total) > 0:
+        worst_total_setup = leak_total.index[0]
+        worst_total_value = float(leak_total.iloc[0])
+
+        if worst_total_value < 0:
+            st.error(
+                f"📉 Largest Money Leak: **{worst_total_setup}** has lost you **{worst_total_value:.2f}** total."
+            )
+        else:
+            st.success(
+                f"✅ No losing setup detected. Weakest setup: **{worst_total_setup}** (total {worst_total_value:.2f})."
+            )
+
+    st.write("")
+
+    # -----------------------------------
+    # 🧠 Biggest Leak Detector (AVG)
+    # -----------------------------------
+    st.subheader("🧠 AI Performance Insight")
+
+    leak_setup = (
+        df.groupby("setup")["net_pnl"]
+        .mean()
+        .sort_values()
+    )
+
+    if len(leak_setup) > 0:
+        worst_setup = leak_setup.index[0]
+        worst_value = float(leak_setup.iloc[0])
+
+        if worst_value < 0:
+            st.error(
+                f"🚨 Biggest Leak Detected: Your **{worst_setup}** setup is losing money "
+                f"(avg **{worst_value:.2f}** per trade)."
+            )
+        else:
+            st.success(
+                f"✅ No losing setup detected. Weakest setup: **{worst_setup}** (avg {worst_value:.2f})."
+            )
+
+    st.write("")
+
+    # -----------------------------------
     # Filters
-    colA, colB, colC = st.columns(3)
-    with colA:
-        symbols = st.multiselect("Symbol", sorted(df["symbol"].unique()), default=sorted(df["symbol"].unique()))
-    with colB:
-        setups = st.multiselect("Setup", sorted(df["setup"].unique()), default=sorted(df["setup"].unique()))
-    with colC:
-        directions = st.multiselect("Direction", sorted(df["direction"].unique()), default=sorted(df["direction"].unique()))
-
-    f = df[
-        df["symbol"].isin(symbols)
-        & df["setup"].isin(setups)
-        & df["direction"].isin(directions)
-    ].copy()
-
-    if f.empty:
-        st.warning("No trades match filters.")
-        st.stop()
-
-    # ---- Core stats (money) ----
-    total = f["net_pnl"].sum()
-    trades = len(f)
-    win_rate = f["is_win"].mean() * 100
-    pf_money = profit_factor(f["net_pnl"])
-    expectancy_money = f["net_pnl"].mean()
-
-    # ---- Process stats (R) ----
-    r_series = f["R"].dropna()
-    avg_r = r_series.mean() if len(r_series) else 0.0
-    expectancy_r = r_series.mean() if len(r_series) else 0.0
-    pf_r = profit_factor(r_series) if len(r_series) else 0.0
-    pct_over_2r = (r_series[r_series >= 2].count() / r_series.count() * 100) if len(r_series) else 0.0
-    pct_under_minus1r = (r_series[r_series <= -1].count() / r_series.count() * 100) if len(r_series) else 0.0
-
-    f = f.sort_values("date")
-    f["equity"] = f["net_pnl"].cumsum()
-    mdd = max_drawdown(f["equity"])
-
-    # KPIs row 1 (money)
-    st.subheader("Money Metrics")
-    k1, k2, k3, k4, k5, k6 = st.columns(6)
-    k1.metric("Net P&L", f"{total:.2f}")
-    k2.metric("Trades", trades)
-    k3.metric("Win Rate", f"{win_rate:.1f}%")
-    k4.metric("Profit Factor (money)", "∞" if pf_money == float("inf") else f"{pf_money:.2f}")
-    k5.metric("Expectancy / trade (money)", f"{expectancy_money:.2f}")
-    k6.metric("Max Drawdown (money)", f"{mdd:.2f}")
-
-    # KPIs row 2 (R)
-    st.subheader("Process Metrics (R)")
-    r1, r2, r3, r4, r5 = st.columns(5)
-    r1.metric("Avg R", f"{avg_r:.2f}")
-    r2.metric("Expectancy (R)", f"{expectancy_r:.2f}")
-    r3.metric("Profit Factor (R)", "∞" if pf_r == float("inf") else f"{pf_r:.2f}")
-    r4.metric("% trades ≥ 2R", f"{pct_over_2r:.1f}%")
-    r5.metric("% trades ≤ -1R", f"{pct_under_minus1r:.1f}%")
-
-    st.divider()
-
-    # Equity curve
-    st.subheader("Equity Curve")
-    fig = plt.figure()
-    plt.plot(f["date"], f["equity"])
-    plt.xticks(rotation=25)
-    plt.tight_layout()
-    st.pyplot(fig)
-
-    st.divider()
-
-    # Best/Worst
-    left, right = st.columns(2)
-    with left:
-        st.subheader("Best Trades (by R)")
-        st.dataframe(
-            f.sort_values("R", ascending=False)[["date","symbol","setup","direction","net_pnl","risk","R"]].head(5),
-            use_container_width=True
-        )
-    with right:
-        st.subheader("Worst Trades (by R)")
-        st.dataframe(
-            f.sort_values("R", ascending=True)[["date","symbol","setup","direction","net_pnl","risk","R"]].head(5),
-            use_container_width=True
-        )
-
-    st.divider()
-
-    # Breakdowns
+    # -----------------------------------
+    st.markdown("### Filters")
     c1, c2, c3 = st.columns(3)
 
     with c1:
-        st.subheader("By Setup")
-        by_setup = f.groupby("setup").agg(
-            trades=("net_pnl","count"),
-            pnl=("net_pnl","sum"),
-            avg_R=("R","mean"),
-            expectancy_R=("R","mean"),
-            win_rate=("is_win","mean"),
-        ).sort_values("pnl", ascending=False)
-        by_setup["win_rate"] = (by_setup["win_rate"] * 100).round(1)
-        by_setup["avg_R"] = by_setup["avg_R"].round(2)
-        by_setup["expectancy_R"] = by_setup["expectancy_R"].round(2)
-        st.dataframe(by_setup, use_container_width=True)
+        symbols = sorted(df["symbol"].unique().tolist())
+        symbol_filter = st.multiselect("Symbol", symbols, default=symbols)
 
     with c2:
-        st.subheader("By Day")
-        by_day = f.groupby("day").agg(
-            trades=("net_pnl","count"),
-            pnl=("net_pnl","sum"),
-            avg_R=("R","mean"),
-            win_rate=("is_win","mean"),
-        ).sort_values("pnl", ascending=False)
-        by_day["win_rate"] = (by_day["win_rate"] * 100).round(1)
-        by_day["avg_R"] = by_day["avg_R"].round(2)
-        st.dataframe(by_day, use_container_width=True)
+        setups = sorted(df["setup"].unique().tolist())
+        setup_filter = st.multiselect("Setup", setups, default=setups)
 
     with c3:
-        st.subheader("By Hour")
-        by_hour = f.groupby("hour").agg(
-            trades=("net_pnl","count"),
-            pnl=("net_pnl","sum"),
-            avg_R=("R","mean"),
-            win_rate=("is_win","mean"),
-        ).sort_values("pnl", ascending=False)
-        by_hour["win_rate"] = (by_hour["win_rate"] * 100).round(1)
-        by_hour["avg_R"] = by_hour["avg_R"].round(2)
+        dirs = sorted(df["direction"].unique().tolist())
+        dir_filter = st.multiselect("Direction", dirs, default=dirs)
+
+    data = df[
+        df["symbol"].isin(symbol_filter)
+        & df["setup"].isin(setup_filter)
+        & df["direction"].isin(dir_filter)
+    ].copy()
+
+    if len(data) == 0:
+        st.warning("No rows match your filters.")
+        st.stop()
+
+    # -----------------------------------
+    # Core metrics
+    # -----------------------------------
+    net = float(data["net_pnl"].sum())
+    trades = int(len(data))
+    win_rate = float((data["is_win"].mean()) * 100.0) if trades else 0.0
+    pf_money = profit_factor(data["net_pnl"])
+    expectancy_money = float(data["net_pnl"].mean())
+
+    equity = data.sort_values("date")["net_pnl"].cumsum()
+    mdd_money = max_drawdown(equity)
+
+    avg_r = float(data["R"].mean()) if data["R"].notna().any() else 0.0
+    pf_r = profit_factor(data["R"].dropna())
+    exp_r = float(data["R"].dropna().mean()) if data["R"].notna().any() else 0.0
+    pct_2r = float((data["R"] >= 2).mean() * 100.0) if "R" in data else 0.0
+    pct_m1r = float((data["R"] <= -1).mean() * 100.0) if "R" in data else 0.0
+
+    st.markdown("## Money Metrics")
+    m1, m2, m3, m4, m5, m6 = st.columns(6)
+    m1.metric("Net P&L", f"{net:.2f}")
+    m2.metric("Trades", f"{trades}")
+    m3.metric("Win Rate", f"{win_rate:.1f}%")
+    m4.metric("Profit Factor (money)", f"{pf_money:.2f}" if np.isfinite(pf_money) else "∞")
+    m5.metric("Expectancy / trade (money)", f"{expectancy_money:.2f}")
+    m6.metric("Max Drawdown (money)", f"{mdd_money:.2f}")
+
+    st.write("")
+
+    st.markdown("## Process Metrics (R)")
+    r1, r2, r3, r4, r5 = st.columns(5)
+    r1.metric("Avg R", f"{avg_r:.2f}")
+    r2.metric("Expectancy (R)", f"{exp_r:.2f}")
+    r3.metric("Profit Factor (R)", f"{pf_r:.2f}" if np.isfinite(pf_r) else "∞")
+    r4.metric("% trades ≥ 2R", f"{pct_2r:.1f}%")
+    r5.metric("% trades ≤ -1R", f"{pct_m1r:.1f}%")
+
+    st.write("")
+
+    # -----------------------------------
+    # Best / Worst trades
+    # -----------------------------------
+    st.markdown("## Best / Worst Trades (by R)")
+    left, right = st.columns(2)
+
+    cols_show = ["date", "symbol", "setup", "direction", "net_pnl", "risk", "R"]
+    best = data.sort_values("R", ascending=False).head(10)[cols_show]
+    worst = data.sort_values("R", ascending=True).head(10)[cols_show]
+
+    with left:
+        st.write("### Best Trades (by R)")
+        st.dataframe(best, use_container_width=True)
+
+    with right:
+        st.write("### Worst Trades (by R)")
+        st.dataframe(worst, use_container_width=True)
+
+    st.write("")
+
+    # -----------------------------------
+    # Breakdowns
+    # -----------------------------------
+    st.markdown("## Breakdowns")
+    b1, b2, b3 = st.columns(3)
+
+    by_setup = (
+        data.groupby("setup")
+        .agg(
+            trades=("net_pnl", "count"),
+            pnl=("net_pnl", "sum"),
+            avg_R=("R", "mean"),
+            expectancy_R=("R", "mean"),
+            win_rate=("is_win", "mean"),
+        )
+        .reset_index()
+    )
+    by_setup["win_rate"] = (by_setup["win_rate"] * 100.0).round(2)
+
+    by_day = (
+        data.groupby("day")
+        .agg(
+            trades=("net_pnl", "count"),
+            pnl=("net_pnl", "sum"),
+            avg_R=("R", "mean"),
+            win_rate=("is_win", "mean"),
+        )
+        .reset_index()
+    )
+    by_day["win_rate"] = (by_day["win_rate"] * 100.0).round(2)
+
+    by_hour = (
+        data.groupby("hour")
+        .agg(
+            trades=("net_pnl", "count"),
+            pnl=("net_pnl", "sum"),
+            avg_R=("R", "mean"),
+            win_rate=("is_win", "mean"),
+        )
+        .reset_index()
+        .sort_values("hour")
+    )
+    by_hour["win_rate"] = (by_hour["win_rate"] * 100.0).round(2)
+
+    with b1:
+        st.write("### By Setup")
+        st.dataframe(by_setup, use_container_width=True)
+
+    with b2:
+        st.write("### By Day")
+        st.dataframe(by_day, use_container_width=True)
+
+    with b3:
+        st.write("### By Hour")
         st.dataframe(by_hour, use_container_width=True)
 
-    st.divider()
-    st.subheader("Raw Trades")
-    st.dataframe(f, use_container_width=True)
+    st.write("")
+
+    # -----------------------------------
+    # Raw trades
+    # -----------------------------------
+    st.markdown("## Raw Trades")
+    st.dataframe(
+        data.sort_values("date")[[
+            "date", "symbol", "direction", "entry", "exit", "size", "fees",
+            "setup", "pip_value", "risk", "entry_eff", "exit_eff",
+            "gross_pnl_base", "gross_pnl", "net_pnl", "R", "is_win", "day", "hour"
+        ]],
+        use_container_width=True
+    )
+
+    # -----------------------------------
+    # Diagnostics
+    # -----------------------------------
+    if show_debug:
+        st.write("")
+        st.subheader("Diagnostics")
+        st.write("Rows:", len(df), "| Filtered rows:", len(data))
+        st.write("Price divisor:", xau_price_divisor)
+        st.write("Known P&L:", known_profit)
+        st.write("Calibration row:", calib_row)
+        st.write("Multiplier:", mult)
 
 else:
     st.info("Upload a CSV to begin.")
