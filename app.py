@@ -12,30 +12,38 @@ Built for traders who treat performance like a business.
 
 
 # ---- Sidebar: Calibration ----
-st.sidebar.header("Trade Precision Mode")
-xau_price_divisor = st.sidebar.selectbox(
-    "XAU price divisor (divide entry/exit by this)",
-    options=[1, 10, 100, 1000],
-    index=0
-)
+# Sidebar — Control Center
+with st.sidebar:
 
-known_profit = st.sidebar.number_input(
-    "Known MT4 profit for selected trade (optional)",
-    value=0.0,
-    step=0.01,
-    help="Type the profit shown in MT4 for a specific trade, e.g. 28.75"
-)
+    st.header("Control Center")
+    st.caption("Upload your trades. Tune the engine. Find your edge.")
 
-calib_row = st.sidebar.number_input(
-    "Which row to use for calibration? (0 = first row)",
-    min_value=0,
-    value=0,
-    step=1
-)
+    with st.expander("Advanced: Broker Calibration", expanded=False):
 
-show_debug = st.sidebar.checkbox("Show debug", value=False)
+        xau_price_divisor = st.selectbox(
+            "Price scaling (divide entry/exit by)",
+            options=[1, 10, 100, 1000],
+            index=0
+        )
 
-uploaded = st.file_uploader("Upload your journal CSV", type=["csv"])
+        known_profit = st.number_input(
+            "Broker P&L (optional)",
+            value=0.0,
+            step=0.01,
+            help="Type the profit shown in MT4 for a specific trade."
+        )
+
+        calib_row = st.number_input(
+            "Calibration row (0 = first trade)",
+            min_value=0,
+            value=0,
+            step=1
+        )
+
+        show_debug = st.checkbox("Developer mode", value=False)
+
+
+uploaded = st.file_uploader("Upload a CSV, then tune the engine to match your broker.", type=["csv"])
 
 
 def profit_factor(series: pd.Series) -> float:
