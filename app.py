@@ -5,9 +5,9 @@ import matplotlib.pyplot as plt
 st.set_page_config(page_title="Trading Journal Analyzer", layout="wide")
 st.title("R-Edge — Find Your Edge. Eliminate Your Losses.")
 st.markdown("""
-### Built for traders serious about performance.
+### Find Your Edge. Eliminate Costly Mistakes.
 
-Upload your journal. Discover what actually makes you money.
+Built for traders who treat performance like a business.
 """)
 
 
